@@ -21,6 +21,7 @@ class D3D12Implementation {
 		ComPtr<ID3D12RootSignature> m_rootSignature;
 		ComPtr<IDXGISwapChain> m_swapChain;
 		ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
+		ComPtr<ID3D12PipelineState> m_pipelineState;
 		ComPtr<ID3D12Resource> m_renderTargets[BufferCount];
 		int m_rtvDescriptorSize = -1;
 

@@ -244,9 +244,6 @@
     <ClInclude Include="src\Graphics\D3D12CommonHeaders.h" />
     <ClInclude Include="src\Graphics\D3D12Implementation.h" />
   </ItemGroup>
-  <ItemGroup>
-    <FxCompile Include="src\Shaders\shaders.hlsl" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

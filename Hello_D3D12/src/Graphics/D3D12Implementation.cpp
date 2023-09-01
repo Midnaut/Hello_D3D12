@@ -274,10 +274,55 @@ void D3D12Implementation::LoadAssets() {
 		// Describe and create the graphics pipeline state object (PSO)
 
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+		
+		D3D12_RASTERIZER_DESC rasterizerDesc = {};
+		rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
+		rasterizerDesc.CullMode = D3D12_CULL_MODE_BACK;
+		rasterizerDesc.FrontCounterClockwise = FALSE;
+		rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
+		rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+		rasterizerDesc.DepthClipEnable = TRUE;
+		rasterizerDesc.MultisampleEnable = FALSE;
+		rasterizerDesc.AntialiasedLineEnable = FALSE;
+		rasterizerDesc.ForcedSampleCount = 0;
+		rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+
+		D3D12_RENDER_TARGET_BLEND_DESC renderTargetDesc = {};
+		renderTargetDesc.BlendEnable = FALSE;
+		renderTargetDesc.LogicOpEnable = FALSE;
+		renderTargetDesc.SrcBlend = D3D12_BLEND_ONE;
+		renderTargetDesc.DestBlend = D3D12_BLEND_ZERO;
+		renderTargetDesc.BlendOp = D3D12_BLEND_OP_ADD;
+		renderTargetDesc.SrcBlendAlpha = D3D12_BLEND_ONE;
+		renderTargetDesc.DestBlendAlpha = D3D12_BLEND_ZERO;
+		renderTargetDesc.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+		renderTargetDesc.LogicOp = D3D12_LOGIC_OP_NOOP;
+		renderTargetDesc.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+		D3D12_BLEND_DESC blendDesc = {};
+		blendDesc.AlphaToCoverageEnable = FALSE;
+		blendDesc.IndependentBlendEnable = FALSE;
+		for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
+		{
+			blendDesc.RenderTarget[i] = renderTargetDesc;
+		}
+
 		psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
 		psoDesc.pRootSignature = m_rootSignature.Get();
 		psoDesc.VS = {reinterpret_cast<UINT8*>(vertexShader->GetBufferPointer()), vertexShader->GetBufferSize()};
 		psoDesc.PS = { reinterpret_cast<UINT8*>(pixelShader->GetBufferPointer()), pixelShader->GetBufferSize() };
+		psoDesc.RasterizerState = rasterizerDesc;
+		psoDesc.BlendState = blendDesc;
+		psoDesc.DepthStencilState.DepthEnable = FALSE;
+		psoDesc.DepthStencilState.StencilEnable = FALSE;
+		psoDesc.SampleMask = UINT_MAX;
+		psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+		psoDesc.NumRenderTargets = 1;
+		psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		psoDesc.SampleDesc.Count = 1;
+		DXCall(m_mainDevice->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)));
+
+
 
 	}
 }
