@@ -18,8 +18,8 @@ D3D12Implementation::D3D12Implementation(HWND windowHandle, int windowWidth, int
 	m_viewport.MaxDepth = D3D12_MAX_DEPTH;
 	
 	m_scissorRect = {};
-	m_scissorRect.left = 0.0f;
-	m_scissorRect.top = 0.0f;
+	m_scissorRect.left = 0;
+	m_scissorRect.top = 0;
 	m_scissorRect.right = static_cast<LONG>(windowWidth);
 	m_scissorRect.bottom = static_cast<LONG>(windowHeight);
 
@@ -330,24 +330,24 @@ void D3D12Implementation::LoadAssets() {
 		rasterizerDesc.ForcedSampleCount = 0;
 		rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
 
-		D3D12_RENDER_TARGET_BLEND_DESC renderTargetDesc = {};
-		renderTargetDesc.BlendEnable = FALSE;
-		renderTargetDesc.LogicOpEnable = FALSE;
-		renderTargetDesc.SrcBlend = D3D12_BLEND_ONE;
-		renderTargetDesc.DestBlend = D3D12_BLEND_ZERO;
-		renderTargetDesc.BlendOp = D3D12_BLEND_OP_ADD;
-		renderTargetDesc.SrcBlendAlpha = D3D12_BLEND_ONE;
-		renderTargetDesc.DestBlendAlpha = D3D12_BLEND_ZERO;
-		renderTargetDesc.BlendOpAlpha = D3D12_BLEND_OP_ADD;
-		renderTargetDesc.LogicOp = D3D12_LOGIC_OP_NOOP;
-		renderTargetDesc.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+		D3D12_RENDER_TARGET_BLEND_DESC renderTargetBlendDesc = {};
+		renderTargetBlendDesc.BlendEnable = FALSE;
+		renderTargetBlendDesc.LogicOpEnable = FALSE;
+		renderTargetBlendDesc.SrcBlend = D3D12_BLEND_ONE;
+		renderTargetBlendDesc.DestBlend = D3D12_BLEND_ZERO;
+		renderTargetBlendDesc.BlendOp = D3D12_BLEND_OP_ADD;
+		renderTargetBlendDesc.SrcBlendAlpha = D3D12_BLEND_ONE;
+		renderTargetBlendDesc.DestBlendAlpha = D3D12_BLEND_ZERO;
+		renderTargetBlendDesc.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+		renderTargetBlendDesc.LogicOp = D3D12_LOGIC_OP_NOOP;
+		renderTargetBlendDesc.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
 		D3D12_BLEND_DESC blendDesc = {};
 		blendDesc.AlphaToCoverageEnable = FALSE;
 		blendDesc.IndependentBlendEnable = FALSE;
 		for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
 		{
-			blendDesc.RenderTarget[i] = renderTargetDesc;
+			blendDesc.RenderTarget[i] = renderTargetBlendDesc;
 		}
 
 		psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
@@ -476,11 +476,11 @@ void D3D12Implementation::PopulateCommandList() {
 
 	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle{};
 	rtvHandle = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
-	rtvHandle.ptr += (m_frameIndex * m_rtvDescriptorSize);
+	rtvHandle.ptr += (static_cast<SIZE_T>(m_frameIndex) * m_rtvDescriptorSize);
 	m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
 	// Record the commands
-	const float clearColor[] = { 0.0f, 0.2, 0.4f, 1.0f };
+	const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
 	m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
