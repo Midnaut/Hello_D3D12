@@ -51,6 +51,8 @@ void Application::Initialize() {
 void Application::Run() {
 	while (isRunning) {
 		ProcessInput();
+		Update();
+		Render();
 	}
 }
 
@@ -69,6 +71,23 @@ void Application::ProcessInput() {
 		}
 
 	}
+}
+
+void Application::Update() {
+	
+	if (!uncappedFrameRate) {
+		int timeToWait = TARGET_MILLISECONDS_PER_FRAME - (SDL_GetTicks() - millisecondsPreviousFrame);
+
+		// Release control to OS
+		if (timeToWait > 0 && timeToWait <= millisecondsPreviousFrame) {
+			SDL_Delay(timeToWait);
+		}
+	}
+
+}
+
+void Application::Render() {
+	d3d12_imp->Render();
 }
 
 void Application::Destroy() {

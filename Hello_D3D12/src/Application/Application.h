@@ -4,9 +4,14 @@
 #include <memory>
 #include "../Graphics/D3D12Implementation.h"
 
+const int TARGET_FPS = 120;
+const int TARGET_MILLISECONDS_PER_FRAME = 1000 / TARGET_FPS;
+
 class Application {
 	private:
-
+		
+		bool uncappedFrameRate = false;
+		int millisecondsPreviousFrame = 0;
 
 		bool isRunning;
 		SDL_Window* window = nullptr;
@@ -20,6 +25,8 @@ class Application {
 		void Initialize();
 		void Run();
 		void ProcessInput();
+		void Update();
+		void Render();
 		void Destroy();
 
 		static int windowWidth;

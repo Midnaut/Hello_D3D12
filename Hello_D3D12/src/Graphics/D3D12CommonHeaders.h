@@ -10,6 +10,7 @@
 
 #include <wrl.h>
 #include <spdlog/spdlog.h>
+#include <glm/glm.hpp>
 
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3d12.lib")

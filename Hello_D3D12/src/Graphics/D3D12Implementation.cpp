@@ -7,13 +7,38 @@ D3D12Implementation::D3D12Implementation(HWND windowHandle, int windowWidth, int
 	m_windowHandle = windowHandle;
 	m_windowWidth = windowWidth;
 	m_windowHeight = windowHeight;
+	m_frameIndex = 0;
+
+	m_viewport = {};
+	m_viewport.TopLeftX = 0.0;
+	m_viewport.TopLeftY = 0.0;
+	m_viewport.Width = static_cast<float>(windowWidth);
+	m_viewport.Height = static_cast<float>(windowHeight);
+	m_viewport.MinDepth = D3D12_MIN_DEPTH;
+	m_viewport.MaxDepth = D3D12_MAX_DEPTH;
+	
+	m_scissorRect = {};
+	m_scissorRect.left = 0.0f;
+	m_scissorRect.top = 0.0f;
+	m_scissorRect.right = static_cast<LONG>(windowWidth);
+	m_scissorRect.bottom = static_cast<LONG>(windowHeight);
+
+	m_rtvDescriptorSize = 0;
+
+	m_aspectRatio = m_viewport.Width / m_viewport.Height;
+
+	// Shut the warnings up
+	m_fenceEvent = nullptr;
+	m_fenceValue = 0;
+	m_vertexBufferView = {};
+
 	spdlog::info("D3D12Implementation Constructor Called");
 }
 
 D3D12Implementation::~D3D12Implementation() {
+
 	spdlog::info("D3D12Implementation Destructor Called");
 }
-
 
 bool D3D12Implementation::Initialize() {
 
@@ -120,13 +145,25 @@ bool D3D12Implementation::Initialize() {
 	return true;
 }
 
-
 void D3D12Implementation::Render() {
 
+	// Record all commands we need to render into the command list
+	PopulateCommandList();
+
+	// Execute the command list.
+	ID3D12CommandList* ppCommanLists[] = { m_commandList.Get() };
+	m_commandQueue->ExecuteCommandLists(_countof(ppCommanLists), ppCommanLists);
+
+	// Present the frame
+	DXCall(m_swapChain->Present(1, 0));
+
+	WaitForPreviousFrame();
 }
 
-
 void D3D12Implementation::Shutdown() {
+	
+	WaitForPreviousFrame();
+
 	release(m_dxgiFactory);
 
 #ifdef _DEBUG
@@ -149,6 +186,9 @@ void D3D12Implementation::Shutdown() {
 #endif // _DEBUG
 
 	release(m_mainDevice);
+
+
+	CloseHandle(m_fenceEvent);
 }
 
 void D3D12Implementation::LoadPipeline() {
@@ -161,23 +201,23 @@ void D3D12Implementation::LoadPipeline() {
 	DXCall(m_mainDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue)));
 
 	// Describe and create the swap chain
-	DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
+	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
 	swapChainDesc.BufferCount = BufferCount;
-	swapChainDesc.BufferDesc.Width = m_windowWidth;
-	swapChainDesc.BufferDesc.Height = m_windowHeight;
-	swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	swapChainDesc.Width = m_windowWidth;
+	swapChainDesc.Height = m_windowHeight;
+	swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-	swapChainDesc.OutputWindow = m_windowHandle;
 	swapChainDesc.SampleDesc.Count = 1;
-	swapChainDesc.Windowed = TRUE;
 
-	ComPtr<IDXGISwapChain> swapchain;
-	DXCall(m_dxgiFactory->CreateSwapChain(m_commandQueue.Get(), &swapChainDesc, &swapchain));
+	ComPtr<IDXGISwapChain1> swapchain;
+	DXCall(m_dxgiFactory->CreateSwapChainForHwnd(m_commandQueue.Get(),m_windowHandle, &swapChainDesc, nullptr, nullptr, &swapchain));
+	
 	DXCall(swapchain.As(&m_swapChain));
 	// No fullscreen
 	DXCall(m_dxgiFactory->MakeWindowAssociation(m_windowHandle, DXGI_MWA_NO_ALT_ENTER));
 
+	m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 
 	// Create Descriptor Heaps
 	{
@@ -221,7 +261,8 @@ void D3D12Implementation::LoadAssets() {
 		ComPtr<ID3DBlob> signature;
 		ComPtr<ID3DBlob> error;
 		DXCall(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error));
-		DXCall(m_mainDevice->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
+		DXCall(m_mainDevice->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(),
+			IID_PPV_ARGS(&m_rootSignature)));
 	}
 
 	// Create the pipeline state
@@ -252,8 +293,10 @@ void D3D12Implementation::LoadAssets() {
 		std::wstring shaderFilePath = assetsPath + shaderFile;
 
 
-		DXCall(D3DCompileFromFile(shaderFilePath.c_str(), nullptr, nullptr, "VSMain", "vs_5_0", compileFlags, 0, &vertexShader, &vertexShaderCompileErrors));
-		DXCall(D3DCompileFromFile(shaderFilePath.c_str(), nullptr, nullptr, "PSMain", "ps_5_0", compileFlags, 0, &pixelShader, &pixelShaderCompileErrors));
+		DXCall(D3DCompileFromFile(shaderFilePath.c_str(), nullptr, nullptr, "VSMain", "vs_5_0", compileFlags,
+			0, &vertexShader, &vertexShaderCompileErrors));
+		DXCall(D3DCompileFromFile(shaderFilePath.c_str(), nullptr, nullptr, "PSMain", "ps_5_0", compileFlags,
+			0, &pixelShader, &pixelShaderCompileErrors));
 		// Define the Vertex Input Layout
 
 		//	D3D12_INPUT_ELEMENT_DESC
@@ -321,16 +364,155 @@ void D3D12Implementation::LoadAssets() {
 		psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
 		psoDesc.SampleDesc.Count = 1;
 		DXCall(m_mainDevice->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)));
-
-
-
 	}
+
+	// Create the command list;
+	DXCall(m_mainDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), 
+		m_pipelineState.Get(), IID_PPV_ARGS(&m_commandList)));
+	// Command lists are created in the recording state.Closing now, as nothing to record.
+	DXCall(m_commandList->Close());
+
+	// Create the vertex buffer
+	{
+		struct Vertex
+		{
+			glm::vec3 position;
+			glm::vec4 color;
+		};
+
+		Vertex triangleVerts[] =
+		{
+			{ glm::vec3(0.0f,	 0.25f * m_aspectRatio,	0.0f), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) },
+			{ glm::vec3(0.25f,	-0.25f * m_aspectRatio, 0.0f), glm::vec4(0.0f, 1.0f, 0.0f, 1.0f) },
+			{ glm::vec3(-0.25f, -0.25f * m_aspectRatio, 0.0f), glm::vec4(0.0f, 0.0f, 1.0f, 1.0f) },
+		};
+
+		const UINT vertexBufferSize = sizeof(triangleVerts);
+
+		// Create and upload the vertex information
+		D3D12_HEAP_PROPERTIES heapProps = {};
+		heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+		heapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		heapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		heapProps.CreationNodeMask = 1;
+		heapProps.VisibleNodeMask = 1;
+
+		DXGI_SAMPLE_DESC sampleDesc = {};
+		sampleDesc.Count = 1;
+		sampleDesc.Quality = 0;
+
+		D3D12_RESOURCE_DESC vertexBufferDesc = {};
+		vertexBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+		vertexBufferDesc.Alignment = 0;
+		vertexBufferDesc.Width = vertexBufferSize;
+		vertexBufferDesc.Height = 1,
+		vertexBufferDesc.DepthOrArraySize = 1;
+		vertexBufferDesc.MipLevels = 1;
+		vertexBufferDesc.Format = DXGI_FORMAT_UNKNOWN;
+		vertexBufferDesc.SampleDesc = sampleDesc;
+		vertexBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+		vertexBufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+		DXCall(m_mainDevice->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &vertexBufferDesc, 
+			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&m_vertexBuffer)));
+
+		// Copy the triangle data into the vertex buffer
+		UINT8* pVertexDataBegin;
+		// We do not intend to read this resource on CPU
+		D3D12_RANGE readRange = {};
+		readRange.Begin = 0;
+		readRange.End = 0;
+
+		DXCall( m_vertexBuffer->Map( 0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin) ) );
+		memcpy(pVertexDataBegin, triangleVerts, vertexBufferSize);
+		m_vertexBuffer->Unmap(0, nullptr);
+
+		// Init vertex buffer view
+		m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
+		m_vertexBufferView.StrideInBytes = sizeof(Vertex);
+		m_vertexBufferView.SizeInBytes = vertexBufferSize;
+	}
+
+	// Create synch objects and wait till assets have been uploaded
+	{
+		DXCall(m_mainDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
+		m_fenceValue = 1;
+
+		m_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+		if (m_fenceEvent == nullptr)
+		{
+			DXCall(HRESULT_FROM_WIN32(GetLastError()));
+		}
+
+		// wait for the command list to execute. Wait for setup to complete before continuing.
+		WaitForPreviousFrame();
+	}
+
 }
 
 void D3D12Implementation::PopulateCommandList() {
 
+	// Reset command allocator for this frame
+	DXCall(m_commandAllocator->Reset());
+
+	// Reset the command list
+	DXCall(m_commandList->Reset(m_commandAllocator.Get(), m_pipelineState.Get()));
+
+	// Set state
+	m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+	m_commandList->RSSetViewports(1, &m_viewport);
+	m_commandList->RSSetScissorRects(1, &m_scissorRect);
+
+	// set back buffer for render taget
+	D3D12_RESOURCE_BARRIER barrier = {};
+	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+	barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+	barrier.Transition.pResource = m_renderTargets[m_frameIndex].Get();
+	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+	m_commandList->ResourceBarrier(1, &barrier);
+
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle{};
+	rtvHandle = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+	rtvHandle.ptr += (m_frameIndex * m_rtvDescriptorSize);
+	m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+	// Record the commands
+	const float clearColor[] = { 0.0f, 0.2, 0.4f, 1.0f };
+	m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+	m_commandList->DrawInstanced(3, 1, 0, 0);
+
+	// Inidcate the backbuffer
+	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+
+	m_commandList->ResourceBarrier(1, &barrier);
+
+	// Close recording
+	DXCall(m_commandList->Close());
 }
 
 void D3D12Implementation::WaitForPreviousFrame() {
+
+	// signial and increment fence value;
+	const UINT64 localFenceValue = m_fenceValue;
+	DXCall(m_commandQueue->Signal(m_fence.Get(), localFenceValue));
+	m_fenceValue++;
+
+
+	// wait until the previous frame is finished 
+	if (m_fence->GetCompletedValue() < localFenceValue)
+	{
+		DXCall(m_fence->SetEventOnCompletion(localFenceValue, m_fenceEvent));
+		// No timeout
+		WaitForSingleObject(m_fenceEvent, INFINITE);
+	}
+
+	
+	m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 
 }
