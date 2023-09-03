@@ -191,6 +191,51 @@ void D3D12Implementation::Shutdown() {
 	CloseHandle(m_fenceEvent);
 }
 
+std::vector<UINT8> D3D12Implementation::GenerateCheckeredTextureData() {
+
+	// Memory / Bitcount of the texture
+	const UINT rowPitch = TextureWidth * TexturePixelSize;
+	const UINT textureSize = rowPitch * TextureHeight;
+
+	// Bitshift down by 3. e.g 256 >> 3 = 32;
+	const UINT cellPitch = rowPitch >> 3;
+	const UINT cellHeight = TextureWidth >> 3;
+
+	// Create a vector to hold the texture memory
+	std::vector<UINT8> data(textureSize);
+	UINT8* pData = &data[0];
+
+	for (UINT n = 0; n < textureSize; n += TexturePixelSize) {
+
+		// This generates cell coordinates of this pixel and then 
+		// Colors the cell correctly.
+		UINT x = n % rowPitch;
+		UINT y = n / rowPitch;
+		UINT i = x / cellPitch;
+		UINT j = y / cellHeight;
+
+
+		if (i%2 == j%2)
+		{
+			// Set a black pixel
+			pData[n	   ]	= 0x00;			//R
+			pData[n + 1]	= 0x00;			//G
+			pData[n + 2]	= 0x00;			//B
+			pData[n + 3]	= 0xff;			//A
+		}
+		else
+		{
+			// Set a white pixel
+			pData[n	   ]	= 0xff;			//R
+			pData[n + 1]	= 0xff;			//G
+			pData[n + 2]	= 0xff;			//B
+			pData[n + 3]	= 0xff;			//A
+		}
+	}
+
+	return data;
+}
+
 void D3D12Implementation::LoadPipeline() {
 
 	// Describe and create the command queue
@@ -211,7 +256,8 @@ void D3D12Implementation::LoadPipeline() {
 	swapChainDesc.SampleDesc.Count = 1;
 
 	ComPtr<IDXGISwapChain1> swapchain;
-	DXCall(m_dxgiFactory->CreateSwapChainForHwnd(m_commandQueue.Get(),m_windowHandle, &swapChainDesc, nullptr, nullptr, &swapchain));
+	DXCall(m_dxgiFactory->CreateSwapChainForHwnd(m_commandQueue.Get(),m_windowHandle, &swapChainDesc, 
+		nullptr, nullptr, &swapchain));
 	
 	DXCall(swapchain.As(&m_swapChain));
 	// No fullscreen
@@ -226,6 +272,12 @@ void D3D12Implementation::LoadPipeline() {
 		rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 		rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 		DXCall(m_mainDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)));
+
+		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+		srvHeapDesc.NumDescriptors = 1;
+		srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+		srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+		DXCall(m_mainDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_srvHeap)));
 
 		m_rtvDescriptorSize = m_mainDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 	}
@@ -251,16 +303,61 @@ void D3D12Implementation::LoadAssets() {
 
 	// Create an empty root signature
 	{
-		D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc{};
-		rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
-		rootSignatureDesc.NumParameters = 0;
-		rootSignatureDesc.pParameters = nullptr;
-		rootSignatureDesc.NumStaticSamplers = 0;
-		rootSignatureDesc.pStaticSamplers = nullptr;
+
+		// Version the root signature
+		D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = {};
+		featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
+
+		if (FAILED( m_mainDevice->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData) ) ) ) 
+		{
+			featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
+		}
+		// Assert if we cant use the right version, mainly because i dont want to code the alternative
+		assert(featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1);
+
+		D3D12_DESCRIPTOR_RANGE1 ranges[1];
+		ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+		ranges[0].NumDescriptors = 1;
+		ranges[0].BaseShaderRegister = 0;
+		ranges[0].RegisterSpace = 0;
+		ranges[0].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC;
+		ranges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+		D3D12_ROOT_PARAMETER1 rootParameters[1];
+		rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+		rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+		rootParameters[0].DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[0].DescriptorTable.pDescriptorRanges = &ranges[0];
+
+		// Create the static sampler, that reads the texture data stored in the uploaded resources
+		// This sampler is visible to the pixel shader stage
+		D3D12_STATIC_SAMPLER_DESC samplerDesc = {};
+		samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+		samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+		samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+		samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+		samplerDesc.MipLODBias = 0;
+		samplerDesc.MaxAnisotropy = 0;
+		samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+		samplerDesc.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+		samplerDesc.MinLOD = 0.0f;
+		samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
+		samplerDesc.ShaderRegister = 0;
+		samplerDesc.RegisterSpace = 0;
+		samplerDesc.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+		D3D12_VERSIONED_ROOT_SIGNATURE_DESC versionedRootSignatureDesc = {};
+		versionedRootSignatureDesc.Version = featureData.HighestVersion;
+		versionedRootSignatureDesc.Desc_1_1.NumParameters = _countof(rootParameters);
+		versionedRootSignatureDesc.Desc_1_1.pParameters = &rootParameters[0];
+		versionedRootSignatureDesc.Desc_1_1.NumStaticSamplers = 1;
+		versionedRootSignatureDesc.Desc_1_1.pStaticSamplers = &samplerDesc;
+		versionedRootSignatureDesc.Desc_1_1.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+		
 
 		ComPtr<ID3DBlob> signature;
 		ComPtr<ID3DBlob> error;
-		DXCall(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error));
+		DXCall(D3D12SerializeVersionedRootSignature( & versionedRootSignatureDesc, &signature, &error));
 		DXCall(m_mainDevice->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(),
 			IID_PPV_ARGS(&m_rootSignature)));
 	}
@@ -289,7 +386,7 @@ void D3D12Implementation::LoadAssets() {
 		}
 
 
-		std::wstring shaderFile = L"Shaders\\shaders.hlsl";
+		std::wstring shaderFile = L"Shaders\\shaders_textured.hlsl";
 		std::wstring shaderFilePath = assetsPath + shaderFile;
 
 
@@ -297,26 +394,16 @@ void D3D12Implementation::LoadAssets() {
 			0, &vertexShader, &vertexShaderCompileErrors));
 		DXCall(D3DCompileFromFile(shaderFilePath.c_str(), nullptr, nullptr, "PSMain", "ps_5_0", compileFlags,
 			0, &pixelShader, &pixelShaderCompileErrors));
+		
 		// Define the Vertex Input Layout
-
-		//	D3D12_INPUT_ELEMENT_DESC
-		//  LPCSTR                     SemanticName;
-		//  UINT                       SemanticIndex;
-		//  DXGI_FORMAT                Format;
-		//  UINT                       InputSlot;
-		//  UINT                       AlignedByteOffset;
-		//  D3D12_INPUT_CLASSIFICATION InputSlotClass;
-		//  UINT                       InstanceDataStepRate;
-
 		D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
 		{
 			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-			{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
+			{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+			{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 28, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
 		};
 
 		// Describe and create the graphics pipeline state object (PSO)
-
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
 		
 		D3D12_RASTERIZER_DESC rasterizerDesc = {};
 		rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
@@ -350,6 +437,7 @@ void D3D12Implementation::LoadAssets() {
 			blendDesc.RenderTarget[i] = renderTargetBlendDesc;
 		}
 
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
 		psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
 		psoDesc.pRootSignature = m_rootSignature.Get();
 		psoDesc.VS = {reinterpret_cast<UINT8*>(vertexShader->GetBufferPointer()), vertexShader->GetBufferSize()};
@@ -369,8 +457,6 @@ void D3D12Implementation::LoadAssets() {
 	// Create the command list;
 	DXCall(m_mainDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), 
 		m_pipelineState.Get(), IID_PPV_ARGS(&m_commandList)));
-	// Command lists are created in the recording state.Closing now, as nothing to record.
-	DXCall(m_commandList->Close());
 
 	// Create the vertex buffer
 	{
@@ -378,13 +464,14 @@ void D3D12Implementation::LoadAssets() {
 		{
 			glm::vec3 position;
 			glm::vec4 color;
+			glm::vec2 uv;
 		};
 
 		Vertex triangleVerts[] =
 		{
-			{ glm::vec3(0.0f,	 0.25f * m_aspectRatio,	0.0f), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) },
-			{ glm::vec3(0.25f,	-0.25f * m_aspectRatio, 0.0f), glm::vec4(0.0f, 1.0f, 0.0f, 1.0f) },
-			{ glm::vec3(-0.25f, -0.25f * m_aspectRatio, 0.0f), glm::vec4(0.0f, 0.0f, 1.0f, 1.0f) },
+			{ glm::vec3(0.0f,	 0.25f * m_aspectRatio,	0.0f), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) , glm::vec2( 0.5f, 0.0f ) },
+			{ glm::vec3(0.25f,	-0.25f * m_aspectRatio, 0.0f), glm::vec4(0.0f, 1.0f, 0.0f, 1.0f) , glm::vec2( 1.0f, 1.0f ) },
+			{ glm::vec3(-0.25f, -0.25f * m_aspectRatio, 0.0f), glm::vec4(0.0f, 0.0f, 1.0f, 1.0f) , glm::vec2( 0.0f, 1.0f ) }
 		};
 
 		const UINT vertexBufferSize = sizeof(triangleVerts);
@@ -397,10 +484,6 @@ void D3D12Implementation::LoadAssets() {
 		heapProps.CreationNodeMask = 1;
 		heapProps.VisibleNodeMask = 1;
 
-		DXGI_SAMPLE_DESC sampleDesc = {};
-		sampleDesc.Count = 1;
-		sampleDesc.Quality = 0;
-
 		D3D12_RESOURCE_DESC vertexBufferDesc = {};
 		vertexBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
 		vertexBufferDesc.Alignment = 0;
@@ -409,7 +492,8 @@ void D3D12Implementation::LoadAssets() {
 		vertexBufferDesc.DepthOrArraySize = 1;
 		vertexBufferDesc.MipLevels = 1;
 		vertexBufferDesc.Format = DXGI_FORMAT_UNKNOWN;
-		vertexBufferDesc.SampleDesc = sampleDesc;
+		vertexBufferDesc.SampleDesc.Count = 1;
+		vertexBufferDesc.SampleDesc.Quality = 0;
 		vertexBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 		vertexBufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
@@ -432,6 +516,125 @@ void D3D12Implementation::LoadAssets() {
 		m_vertexBufferView.StrideInBytes = sizeof(Vertex);
 		m_vertexBufferView.SizeInBytes = vertexBufferSize;
 	}
+
+	// will keep this in scope till the GPU has finished upload instead of using the block scope
+	ComPtr<ID3D12Resource> textureUploadHeap;
+	// Create the "texture"
+	{
+		// Create the default heap props
+		D3D12_HEAP_PROPERTIES heapProps = {};
+		heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+		heapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		heapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		heapProps.CreationNodeMask = 1;
+		heapProps.VisibleNodeMask = 1;
+
+		// Describe and create Texture 2D
+		D3D12_RESOURCE_DESC textureDesc{};
+		textureDesc.MipLevels = 1;
+		textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		textureDesc.Width = TextureWidth;
+		textureDesc.Height = TextureHeight;
+		textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+		textureDesc.DepthOrArraySize = 1;
+		textureDesc.SampleDesc.Count = 1;
+		textureDesc.SampleDesc.Quality = 0;
+		textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+
+		DXCall(m_mainDevice->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &textureDesc, 
+			D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&m_texture)));
+
+		UINT64 uploadBufferSize = 0;
+
+		m_mainDevice->GetCopyableFootprints(&textureDesc, 0, 1, 0, nullptr, nullptr, nullptr, &uploadBufferSize);
+
+		// Creating the GPU upload buffer for the texture
+		// Create the Upload heap props
+		D3D12_HEAP_PROPERTIES uploadHeapProps = {};
+		uploadHeapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+		uploadHeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		uploadHeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		uploadHeapProps.CreationNodeMask = 1;
+		uploadHeapProps.VisibleNodeMask = 1;
+
+		D3D12_RESOURCE_DESC textureBufferDesc = {};
+		textureBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+		textureBufferDesc.Alignment = 0;
+		textureBufferDesc.Width = uploadBufferSize;
+		textureBufferDesc.Height = 1,
+		textureBufferDesc.DepthOrArraySize = 1;
+		textureBufferDesc.MipLevels = 1;
+		textureBufferDesc.Format = DXGI_FORMAT_UNKNOWN;
+		textureBufferDesc.SampleDesc.Count = 1;
+		textureBufferDesc.SampleDesc.Quality = 0;
+		textureBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+		textureBufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+
+		DXCall(m_mainDevice->CreateCommittedResource(&uploadHeapProps, D3D12_HEAP_FLAG_NONE, &textureBufferDesc,
+			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&textureUploadHeap)));
+
+		// Copy data to the intermediate upload heap, then schedule a copy from the upload heap to the
+		// Texture2D resource
+		std::vector<UINT8> textureData = GenerateCheckeredTextureData();
+
+		D3D12_SUBRESOURCE_DATA textureSubresourceData = {};
+		textureSubresourceData.pData = &textureData[0];
+		textureSubresourceData.RowPitch = TextureWidth * TexturePixelSize;
+		textureSubresourceData.SlicePitch = textureSubresourceData.RowPitch * TextureHeight;
+
+		// Update sub resources 
+		// We do not intend to read this resource on CPU
+		D3D12_RANGE readRange = {};
+		readRange.Begin = 0;
+		readRange.End = 0;
+
+		UINT8* pTextureUploadData = nullptr;
+
+		DXCall(textureUploadHeap->Map(0, &readRange, reinterpret_cast<void**>(&pTextureUploadData)));
+		memcpy(pTextureUploadData, textureData.data(), textureData.size());
+		textureUploadHeap->Unmap(0, nullptr);
+
+		D3D12_TEXTURE_COPY_LOCATION srcLocation = {};
+		srcLocation.pResource = textureUploadHeap.Get();
+		srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+		srcLocation.PlacedFootprint.Offset = 0;
+		srcLocation.PlacedFootprint.Footprint.Format = textureDesc.Format;
+		srcLocation.PlacedFootprint.Footprint.Width = textureDesc.Width;
+		srcLocation.PlacedFootprint.Footprint.Height = textureDesc.Height;
+		srcLocation.PlacedFootprint.Footprint.Depth = textureDesc.DepthOrArraySize;
+		srcLocation.PlacedFootprint.Footprint.RowPitch = TextureWidth * TexturePixelSize;
+
+		D3D12_TEXTURE_COPY_LOCATION dstLocation = {};
+		dstLocation.pResource = m_texture.Get(); 
+		dstLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		dstLocation.SubresourceIndex = 0;
+
+		m_commandList->CopyTextureRegion(&dstLocation, 0, 0, 0, &srcLocation, nullptr);
+
+		D3D12_RESOURCE_BARRIER barrier = {};
+		barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+		barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+		barrier.Transition.pResource = m_texture.Get();
+		barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+		barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+		m_commandList->ResourceBarrier(1, &barrier);
+
+		//describe the shader resource view
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.Format = textureDesc.Format;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels = 1;
+		m_mainDevice->CreateShaderResourceView(m_texture.Get(), &srvDesc, m_srvHeap->GetCPUDescriptorHandleForHeapStart());
+	}
+
+	// Close command list and execute to begine the initial gpu setup
+	DXCall(m_commandList->Close());
+	ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
+	m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
 	// Create synch objects and wait till assets have been uploaded
 	{
@@ -460,6 +663,11 @@ void D3D12Implementation::PopulateCommandList() {
 
 	// Set state
 	m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+
+	ID3D12DescriptorHeap* ppHeaps[] = { m_srvHeap.Get() };
+	m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
+	m_commandList->SetGraphicsRootDescriptorTable(0, m_srvHeap->GetGPUDescriptorHandleForHeapStart());
+
 	m_commandList->RSSetViewports(1, &m_viewport);
 	m_commandList->RSSetScissorRects(1, &m_scissorRect);
 
