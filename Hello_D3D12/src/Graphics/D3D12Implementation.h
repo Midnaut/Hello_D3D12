@@ -8,15 +8,25 @@ class D3D12Implementation {
 		static const UINT TexturePixelSize = 4;    // The number of bytes used to represent a pixel in the texture.
 		static const int32_t BufferCount = 2;
 
-		struct SceneConstantBuffer
+		struct Node
 		{
 			glm::vec4 offset;
-			//float padding[60];
+		};
+
+		struct SceneConstantBuffer
+		{
+			// This is here because the const buffer register will have this int take up the space of 4, so we need
+			// to pad the struct to eequal the sie of the shader cont buffer
+			int nodeIdx;
+			int padding[3];
+
+			Node nodes[2];
 		};
 		//static_assert((sizeof(SceneConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
 
 		int m_windowWidth;
 		int m_windowHeight;
+		int m_frameCounter;
 		float m_aspectRatio;
 		HWND m_windowHandle;
 

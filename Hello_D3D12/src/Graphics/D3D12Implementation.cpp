@@ -32,8 +32,8 @@ D3D12Implementation::D3D12Implementation(HWND windowHandle, int windowWidth, int
 	m_fenceValue = 0;
 	m_vertexBufferView = {};
 	m_constantBufferData = {};
-	m_constantBufferData.offset = glm::vec4(0.0f);
 	m_pCbvDataBegin = nullptr;
+	m_frameCounter = 0;
 
 	spdlog::info("D3D12Implementation Constructor Called");
 }
@@ -153,11 +153,28 @@ void D3D12Implementation::Update()
 	const float translationSpeed = 0.005f;
 	const float offsetBounds = 1.25f;
 
-	m_constantBufferData.offset.x += translationSpeed;
-	if (m_constantBufferData.offset.x > offsetBounds)
+	m_constantBufferData.nodes[0].offset.x += translationSpeed;
+	if (m_constantBufferData.nodes[0].offset.x > offsetBounds)
 	{
-		m_constantBufferData.offset.x = -offsetBounds;
+		m_constantBufferData.nodes[0].offset.x = -offsetBounds;
 	}
+
+	m_constantBufferData.nodes[1].offset.y += translationSpeed;
+	if (m_constantBufferData.nodes[1].offset.y > offsetBounds)
+	{
+		m_constantBufferData.nodes[1].offset.y = -offsetBounds;
+	}
+	
+	if (m_frameCounter % 240 >= 120) 
+	{
+		m_constantBufferData.nodeIdx = 1;
+	}
+	else 
+	{
+		m_constantBufferData.nodeIdx = 0;
+	}
+
+	m_frameCounter++;
 
 	memcpy(m_pCbvDataBegin, &m_constantBufferData, sizeof(m_constantBufferData));
 }

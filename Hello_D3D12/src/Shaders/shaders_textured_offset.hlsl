@@ -1,8 +1,14 @@
 
-cbuffer SceneConstantBuffer : register (b0)
+ struct Node
 {
     float4 offset;
-}
+};
+
+cbuffer SceneConstantBuffer : register (b0)
+{
+    int nodeIdx;
+    Node nodes[2];
+};
 
 struct PSInput
 {
@@ -18,12 +24,12 @@ PSInput VSMain(float4 position: POSITION, float4 color: COLOR, float4 uv: TEXCOO
 {
     PSInput result;
 
-    result.position = position + offset;
+    result.position = position + nodes[nodeIdx].offset;
     result.color = color;
     result.uv = uv;
 
     return result;
-}
+};
 
 float4 PSMain(PSInput input) : SV_TARGET
 {
@@ -31,4 +37,4 @@ float4 PSMain(PSInput input) : SV_TARGET
     col *= input.color;
     
     return col;
-}
+};
