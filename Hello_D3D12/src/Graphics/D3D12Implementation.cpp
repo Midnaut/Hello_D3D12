@@ -31,6 +31,9 @@ D3D12Implementation::D3D12Implementation(HWND windowHandle, int windowWidth, int
 	m_fenceEvent = nullptr;
 	m_fenceValue = 0;
 	m_vertexBufferView = {};
+	m_constantBufferData = {};
+	m_constantBufferData.offset = glm::vec4(0.0f);
+	m_pCbvDataBegin = nullptr;
 
 	spdlog::info("D3D12Implementation Constructor Called");
 }
@@ -143,6 +146,20 @@ bool D3D12Implementation::Initialize() {
 	LoadAssets();
 
 	return true;
+}
+
+void D3D12Implementation::Update() 
+{
+	const float translationSpeed = 0.005f;
+	const float offsetBounds = 1.25f;
+
+	m_constantBufferData.offset.x += translationSpeed;
+	if (m_constantBufferData.offset.x > offsetBounds)
+	{
+		m_constantBufferData.offset.x = -offsetBounds;
+	}
+
+	memcpy(m_pCbvDataBegin, &m_constantBufferData, sizeof(m_constantBufferData));
 }
 
 void D3D12Implementation::Render() {
@@ -275,13 +292,18 @@ void D3D12Implementation::LoadPipeline() {
 
 		m_rtvDescriptorSize = m_mainDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-		srvHeapDesc.NumDescriptors = 1;
-		srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-		srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-		DXCall(m_mainDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_srvHeap)));
+		D3D12_DESCRIPTOR_HEAP_DESC srvCbvHeapDesc = {};
+		srvCbvHeapDesc.NumDescriptors = 2;
+		srvCbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+		srvCbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+		DXCall(m_mainDevice->CreateDescriptorHeap(&srvCbvHeapDesc, IID_PPV_ARGS(&m_srvCbvHeap)));
 
-		
+		m_srvCbvDescriptorSize = m_mainDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		/*D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
+		cbvHeapDesc.NumDescriptors = 1;
+		cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+		cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+		DXCall(m_mainDevice->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(&m_cbvHeap)));*/
 		
 	}
 
@@ -319,19 +341,33 @@ void D3D12Implementation::LoadAssets() {
 		// Assert if we cant use the right version, mainly because i dont want to code the alternative
 		assert(featureData.HighestVersion >= D3D_ROOT_SIGNATURE_VERSION_1_1);
 
-		D3D12_DESCRIPTOR_RANGE1 ranges[1];
+		D3D12_DESCRIPTOR_RANGE1 ranges[2];
+		// SRV setup
 		ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 		ranges[0].NumDescriptors = 1;
 		ranges[0].BaseShaderRegister = 0;
 		ranges[0].RegisterSpace = 0;
 		ranges[0].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC;
 		ranges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+		// CBV setup
+		ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+		ranges[1].NumDescriptors = 1;
+		ranges[1].BaseShaderRegister = 0;
+		ranges[1].RegisterSpace = 0;
+		ranges[1].Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC;
+		ranges[1].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
 		D3D12_ROOT_PARAMETER1 rootParameters[1];
+		// SRV + CBV setup
 		rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-		rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-		rootParameters[0].DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+		rootParameters[0].DescriptorTable.NumDescriptorRanges = 2;
 		rootParameters[0].DescriptorTable.pDescriptorRanges = &ranges[0];
+		// CBV setup
+		/*rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+		rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+		rootParameters[1].DescriptorTable.NumDescriptorRanges = 1;
+		rootParameters[1].DescriptorTable.pDescriptorRanges = &ranges[1];*/
 
 		// Create the static sampler, that reads the texture data stored in the uploaded resources
 		// This sampler is visible to the pixel shader stage
@@ -353,15 +389,19 @@ void D3D12Implementation::LoadAssets() {
 		D3D12_VERSIONED_ROOT_SIGNATURE_DESC versionedRootSignatureDesc = {};
 		versionedRootSignatureDesc.Version = featureData.HighestVersion;
 		versionedRootSignatureDesc.Desc_1_1.NumParameters = _countof(rootParameters);
-		versionedRootSignatureDesc.Desc_1_1.pParameters = &rootParameters[0];
+		versionedRootSignatureDesc.Desc_1_1.pParameters = rootParameters;
 		versionedRootSignatureDesc.Desc_1_1.NumStaticSamplers = 1;
 		versionedRootSignatureDesc.Desc_1_1.pStaticSamplers = &samplerDesc;
-		versionedRootSignatureDesc.Desc_1_1.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+		versionedRootSignatureDesc.Desc_1_1.Flags = 
+			D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+			D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+			D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+			D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
 		
 
 		ComPtr<ID3DBlob> signature;
 		ComPtr<ID3DBlob> error;
-		DXCall(D3D12SerializeVersionedRootSignature( & versionedRootSignatureDesc, &signature, &error));
+		DXCall(D3D12SerializeVersionedRootSignature( &versionedRootSignatureDesc, &signature, &error));
 		DXCall(m_mainDevice->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(),
 			IID_PPV_ARGS(&m_rootSignature)));
 	}
@@ -390,7 +430,7 @@ void D3D12Implementation::LoadAssets() {
 		}
 
 
-		std::wstring shaderFile = L"Shaders\\shaders_textured.hlsl";
+		std::wstring shaderFile = L"Shaders\\shaders_textured_offset.hlsl";
 		std::wstring shaderFilePath = assetsPath + shaderFile;
 
 
@@ -492,7 +532,7 @@ void D3D12Implementation::LoadAssets() {
 		vertexBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
 		vertexBufferDesc.Alignment = 0;
 		vertexBufferDesc.Width = vertexBufferSize;
-		vertexBufferDesc.Height = 1,
+		vertexBufferDesc.Height = 1;
 		vertexBufferDesc.DepthOrArraySize = 1;
 		vertexBufferDesc.MipLevels = 1;
 		vertexBufferDesc.Format = DXGI_FORMAT_UNKNOWN;
@@ -519,6 +559,57 @@ void D3D12Implementation::LoadAssets() {
 		m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
 		m_vertexBufferView.StrideInBytes = sizeof(Vertex);
 		m_vertexBufferView.SizeInBytes = vertexBufferSize;
+	}
+
+	// Create the constant buffer
+	{
+		const UINT constantBufferSize = std::max<UINT>(sizeof(SceneConstantBuffer),
+			D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);  // needs to be 256-byte aligned
+
+		
+		// Create and upload the cbv information
+		D3D12_HEAP_PROPERTIES heapProps = {};
+		heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+		heapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		heapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		heapProps.CreationNodeMask = 1;
+		heapProps.VisibleNodeMask = 1;
+
+		D3D12_RESOURCE_DESC constantBufferDesc = {};
+		constantBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+		constantBufferDesc.Alignment = 0;
+		constantBufferDesc.Width = constantBufferSize;
+		constantBufferDesc.Height = 1;
+		constantBufferDesc.DepthOrArraySize = 1;
+		constantBufferDesc.MipLevels = 1;
+		constantBufferDesc.Format = DXGI_FORMAT_UNKNOWN;
+		constantBufferDesc.SampleDesc.Count = 1;
+		constantBufferDesc.SampleDesc.Quality = 0;
+		constantBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+		constantBufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+		DXCall(m_mainDevice->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &constantBufferDesc,
+			D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&m_constantBuffer)));
+
+		// Describe and create the view
+		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
+		cbvDesc.BufferLocation = m_constantBuffer->GetGPUVirtualAddress();
+		cbvDesc.SizeInBytes = constantBufferSize;
+		// Get the SECOND descriptor inside of the descriptor heap
+		D3D12_CPU_DESCRIPTOR_HANDLE srvCbvHandle =  m_srvCbvHeap->GetCPUDescriptorHandleForHeapStart();
+		srvCbvHandle.ptr += m_srvCbvDescriptorSize;
+
+		m_mainDevice->CreateConstantBufferView(&cbvDesc, srvCbvHandle);
+
+		// map and initialise the constant buffer, we dont unmap till the app closes. keeping things mapped for the
+		// lifetime of the resource is AOK!
+
+		// We do not intend to read this resource on CPU
+		D3D12_RANGE readRange = {};
+		readRange.Begin = 0;
+		readRange.End = 0;
+		DXCall(m_constantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_pCbvDataBegin)));
+		memcpy(m_pCbvDataBegin, &m_constantBufferData, sizeof(m_constantBufferData));
 	}
 
 	// will keep this in scope till the GPU has finished upload instead of using the block scope
@@ -621,7 +712,7 @@ void D3D12Implementation::LoadAssets() {
 		barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
 		barrier.Transition.pResource = m_texture.Get();
 		barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-		barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 		barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 
 		m_commandList->ResourceBarrier(1, &barrier);
@@ -632,7 +723,7 @@ void D3D12Implementation::LoadAssets() {
 		srvDesc.Format = textureDesc.Format;
 		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 		srvDesc.Texture2D.MipLevels = 1;
-		m_mainDevice->CreateShaderResourceView(m_texture.Get(), &srvDesc, m_srvHeap->GetCPUDescriptorHandleForHeapStart());
+		m_mainDevice->CreateShaderResourceView(m_texture.Get(), &srvDesc, m_srvCbvHeap->GetCPUDescriptorHandleForHeapStart());
 	}
 
 	// Close command list and execute to begine the initial gpu setup
@@ -644,10 +735,12 @@ void D3D12Implementation::LoadAssets() {
 	{
 		DXCall(m_mainDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_BUNDLE, m_bundleAllocator.Get(),
 			m_pipelineState.Get(), IID_PPV_ARGS(&m_bundleCommandList)));
+
 		m_bundleCommandList->SetGraphicsRootSignature(m_rootSignature.Get());
 		m_bundleCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		m_bundleCommandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 		m_bundleCommandList->DrawInstanced(3, 1, 0, 0);
+
 		DXCall(m_bundleCommandList->Close());
 	}
 
@@ -679,9 +772,9 @@ void D3D12Implementation::PopulateCommandList() {
 	// Set state
 	m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
 
-	ID3D12DescriptorHeap* ppHeaps[] = { m_srvHeap.Get() };
+	ID3D12DescriptorHeap* ppHeaps[] = { m_srvCbvHeap.Get() };
 	m_commandList->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
-	m_commandList->SetGraphicsRootDescriptorTable(0, m_srvHeap->GetGPUDescriptorHandleForHeapStart());
+	m_commandList->SetGraphicsRootDescriptorTable(0, m_srvCbvHeap->GetGPUDescriptorHandleForHeapStart());
 
 	m_commandList->RSSetViewports(1, &m_viewport);
 	m_commandList->RSSetScissorRects(1, &m_scissorRect);
@@ -705,9 +798,7 @@ void D3D12Implementation::PopulateCommandList() {
 	// Record the commands // This has been moved to the bundle  to cache the creation
 	const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
 	m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-	//m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	//m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-	//m_commandList->DrawInstanced(3, 1, 0, 0);
+
 	m_commandList->ExecuteBundle(m_bundleCommandList.Get());
 
 	// Inidcate the backbuffer

@@ -8,6 +8,13 @@ class D3D12Implementation {
 		static const UINT TexturePixelSize = 4;    // The number of bytes used to represent a pixel in the texture.
 		static const int32_t BufferCount = 2;
 
+		struct SceneConstantBuffer
+		{
+			glm::vec4 offset;
+			//float padding[60];
+		};
+		//static_assert((sizeof(SceneConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
+
 		int m_windowWidth;
 		int m_windowHeight;
 		float m_aspectRatio;
@@ -27,16 +34,21 @@ class D3D12Implementation {
 		ComPtr<ID3D12RootSignature> m_rootSignature;
 		ComPtr<IDXGISwapChain3> m_swapChain;
 		ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
-		ComPtr<ID3D12DescriptorHeap> m_srvHeap;
+		ComPtr<ID3D12DescriptorHeap> m_srvCbvHeap;
 		ComPtr<ID3D12PipelineState> m_pipelineState;
 		ComPtr<ID3D12Resource> m_renderTargets[BufferCount];
 
+		int m_srvCbvDescriptorSize = -1;
 		int m_rtvDescriptorSize = -1;
 
 		// App resources.
 		ComPtr<ID3D12Resource> m_vertexBuffer;
 		ComPtr<ID3D12Resource> m_texture;
 		D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+
+		ComPtr<ID3D12Resource> m_constantBuffer;
+		SceneConstantBuffer m_constantBufferData;
+		UINT8* m_pCbvDataBegin;
 
 		// Synch objects
 		UINT m_frameIndex;
@@ -56,6 +68,7 @@ class D3D12Implementation {
 		~D3D12Implementation();
 		bool Initialize();
 		void Shutdown();
+		void Update();
 		void Render();
 };
 

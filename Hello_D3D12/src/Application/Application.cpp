@@ -84,6 +84,8 @@ void Application::Update() {
 		}
 	}
 
+	d3d12_imp->Update();
+
 }
 
 void Application::Render() {
