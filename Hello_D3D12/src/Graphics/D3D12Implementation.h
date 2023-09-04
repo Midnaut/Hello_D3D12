@@ -36,7 +36,7 @@ class D3D12Implementation {
 		// Pipeline objects
 		D3D12_VIEWPORT m_viewport;
 		D3D12_RECT m_scissorRect;
-		ComPtr<ID3D12CommandAllocator> m_commandAllocator;
+		ComPtr<ID3D12CommandAllocator> m_commandAllocators[BufferCount];
 		ComPtr<ID3D12CommandAllocator> m_bundleAllocator;
 		ComPtr<ID3D12CommandQueue> m_commandQueue;
 		ComPtr<ID3D12GraphicsCommandList> m_commandList;

@@ -324,15 +324,16 @@ void D3D12Implementation::LoadPipeline() {
 		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle{};
 		rtvHandle = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
 
-		// Create a RTV for each frame
+		// Create a RTV  and a Command Allocator for each frame
 		for (UINT32 i{ 0 }; i < BufferCount; i++)
 		{
 			DXCall(m_swapChain->GetBuffer(i, IID_PPV_ARGS(&m_renderTargets[i])));
 			m_mainDevice->CreateRenderTargetView(m_renderTargets[i].Get(), nullptr, rtvHandle);
 			rtvHandle.ptr += m_rtvDescriptorSize;
+
+			DXCall(m_mainDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[i])));
 		}
 
-		DXCall(m_mainDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
 		DXCall(m_mainDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_BUNDLE, IID_PPV_ARGS(&m_bundleAllocator)));
 	}
 }
@@ -511,7 +512,7 @@ void D3D12Implementation::LoadAssets() {
 	}
 
 	// Create the command list;
-	DXCall(m_mainDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), 
+	DXCall(m_mainDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].Get(),
 		m_pipelineState.Get(), IID_PPV_ARGS(&m_commandList)));
 
 	// Create the vertex buffer
@@ -776,10 +777,10 @@ void D3D12Implementation::LoadAssets() {
 void D3D12Implementation::PopulateCommandList() {
 
 	// Reset command allocator for this frame
-	DXCall(m_commandAllocator->Reset());
+	DXCall(m_commandAllocators[m_frameIndex]->Reset());
 
 	// Reset the command list
-	DXCall(m_commandList->Reset(m_commandAllocator.Get(), m_pipelineState.Get()));
+	DXCall(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), m_pipelineState.Get()));
 
 	// Set state
 	m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
