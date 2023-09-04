@@ -273,13 +273,16 @@ void D3D12Implementation::LoadPipeline() {
 		rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 		DXCall(m_mainDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)));
 
+		m_rtvDescriptorSize = m_mainDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+
 		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
 		srvHeapDesc.NumDescriptors = 1;
 		srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 		srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 		DXCall(m_mainDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_srvHeap)));
 
-		m_rtvDescriptorSize = m_mainDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+		
+		
 	}
 
 	// Create Frame Resources 
@@ -296,6 +299,7 @@ void D3D12Implementation::LoadPipeline() {
 		}
 
 		DXCall(m_mainDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
+		DXCall(m_mainDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_BUNDLE, IID_PPV_ARGS(&m_bundleAllocator)));
 	}
 }
 
@@ -636,6 +640,17 @@ void D3D12Implementation::LoadAssets() {
 	ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
 	m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
+	// Create and record the bundle list
+	{
+		DXCall(m_mainDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_BUNDLE, m_bundleAllocator.Get(),
+			m_pipelineState.Get(), IID_PPV_ARGS(&m_bundleCommandList)));
+		m_bundleCommandList->SetGraphicsRootSignature(m_rootSignature.Get());
+		m_bundleCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		m_bundleCommandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+		m_bundleCommandList->DrawInstanced(3, 1, 0, 0);
+		DXCall(m_bundleCommandList->Close());
+	}
+
 	// Create synch objects and wait till assets have been uploaded
 	{
 		DXCall(m_mainDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
@@ -687,12 +702,13 @@ void D3D12Implementation::PopulateCommandList() {
 	rtvHandle.ptr += (static_cast<SIZE_T>(m_frameIndex) * m_rtvDescriptorSize);
 	m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-	// Record the commands
+	// Record the commands // This has been moved to the bundle  to cache the creation
 	const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
 	m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-	m_commandList->DrawInstanced(3, 1, 0, 0);
+	//m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	//m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+	//m_commandList->DrawInstanced(3, 1, 0, 0);
+	m_commandList->ExecuteBundle(m_bundleCommandList.Get());
 
 	// Inidcate the backbuffer
 	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;

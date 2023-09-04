@@ -20,8 +20,10 @@ class D3D12Implementation {
 		D3D12_VIEWPORT m_viewport;
 		D3D12_RECT m_scissorRect;
 		ComPtr<ID3D12CommandAllocator> m_commandAllocator;
+		ComPtr<ID3D12CommandAllocator> m_bundleAllocator;
 		ComPtr<ID3D12CommandQueue> m_commandQueue;
 		ComPtr<ID3D12GraphicsCommandList> m_commandList;
+		ComPtr<ID3D12GraphicsCommandList> m_bundleCommandList;
 		ComPtr<ID3D12RootSignature> m_rootSignature;
 		ComPtr<IDXGISwapChain3> m_swapChain;
 		ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
