@@ -316,11 +316,6 @@ void D3D12Implementation::LoadPipeline() {
 		DXCall(m_mainDevice->CreateDescriptorHeap(&srvCbvHeapDesc, IID_PPV_ARGS(&m_srvCbvHeap)));
 
 		m_srvCbvDescriptorSize = m_mainDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-		/*D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
-		cbvHeapDesc.NumDescriptors = 1;
-		cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-		cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-		DXCall(m_mainDevice->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(&m_cbvHeap)));*/
 		
 	}
 
