@@ -12,5 +12,6 @@ Notes:
 
 - This in no way should be used as a starting point for any work. If you want to build something clean, from scratch, with much better architecture I suggest the [3D Game engine progamming's DirectX12 Articles](https://www.3dgep.com/learning-directx-12-1/)
 
+- To follow along, you can go back and check the changelists which were more or less in line with the HelloDX12 projects.
 
 Special thanks: My DX12 sherpa - [Eynx](https://github.com/Eynx)
