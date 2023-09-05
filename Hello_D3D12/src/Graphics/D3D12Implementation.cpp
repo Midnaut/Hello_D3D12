@@ -376,11 +376,6 @@ void D3D12Implementation::LoadAssets() {
 		rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 		rootParameters[0].DescriptorTable.NumDescriptorRanges = 2;
 		rootParameters[0].DescriptorTable.pDescriptorRanges = &ranges[0];
-		// CBV setup
-		/*rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-		rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
-		rootParameters[1].DescriptorTable.NumDescriptorRanges = 1;
-		rootParameters[1].DescriptorTable.pDescriptorRanges = &ranges[1];*/
 
 		// Create the static sampler, that reads the texture data stored in the uploaded resources
 		// This sampler is visible to the pixel shader stage
